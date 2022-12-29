@@ -6,17 +6,59 @@
 
 use std::collections::HashSet;
 
-use crate::{Pairing, Player};
+use crate::{Pairing, PairingAlgorithm, PairingsManager, Player, PlayerHandle, Results};
+
+#[derive(Debug)]
+struct SwissPlayer {
+    player: PlayerHandle,
+
+    strength_of_schedule: f32,
+    extended_strength_of_schedule: f32,
+}
+
+impl From<PlayerHandle> for SwissPlayer {
+    #[inline]
+    fn from(player: PlayerHandle) -> Self {
+        Self {
+            player,
+            strength_of_schedule: 0.0,
+            extended_strength_of_schedule: 0.0,
+        }
+    }
+}
 
 /// Swiss pairing
-#[derive(Debug)]
-pub struct SwissPairing;
+#[derive(Debug, Default)]
+pub struct SwissPairingAlgorithm {
+    players: Vec<SwissPlayer>,
+}
 
-impl Pairing for SwissPairing {
-    fn next_pair(
-        _players: impl AsRef<[Player]>,
-        _pairings: HashSet<(Player, Option<Player>)>,
-    ) -> Vec<(Player, Option<Player>)> {
+impl PairingAlgorithm for SwissPairingAlgorithm {
+    fn new(players: impl AsRef<[PlayerHandle]>) -> Self {
+        let players = players
+            .as_ref()
+            .iter()
+            .map(|player| player.clone().into())
+            .collect::<Vec<_>>();
+        Self { players }
+    }
+
+    fn next_pairings(&self, _pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
         vec![]
+    }
+
+    fn round_ended(&self, _results: impl AsRef<[(Player, Results)]>) {}
+}
+
+pub type SwissPairing = PairingsManager<SwissPairingAlgorithm>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple() {
+        let players = vec![Player::new("test")];
+        let _pairings = SwissPairing::new(players);
     }
 }
