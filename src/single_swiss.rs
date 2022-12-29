@@ -34,11 +34,19 @@ impl PairingAlgorithm for SingleSwissPairingAlgorithm {
         Self { players }
     }
 
-    fn next_pairings(&self, _pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
-        vec![]
+    fn next_pairings(&self, previous_pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
+        let pairings = vec![];
+
+        if previous_pairings.is_empty() {
+            // TODO: shuffle the players and pull random pairings
+        }
+
+        pairings
     }
 
-    fn round_ended(&self, _results: impl AsRef<[(Player, Results)]>) {}
+    fn round_ended<'a>(&self, _results: impl AsRef<[(&'a Player, Results)]>) {
+        // TODO: ensure the results make sense (each player has 1 game and the pairing results make sense)
+    }
 }
 
 pub type SingleSwissPairing = PairingsManager<SingleSwissPairingAlgorithm>;

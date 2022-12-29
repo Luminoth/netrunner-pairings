@@ -30,10 +30,10 @@ pub trait PairingAlgorithm {
     fn new(players: impl AsRef<[PlayerHandle]>) -> Self;
 
     /// Determine the next pairing of the given players
-    fn next_pairings(&self, pairings: &HashSet<Pairing>, round: usize) -> Vec<Pairing>;
+    fn next_pairings(&self, previous_pairings: &HashSet<Pairing>, round: usize) -> Vec<Pairing>;
 
     /// Update internal state with round results
-    fn round_ended(&self, results: impl AsRef<[(Player, Results)]>);
+    fn round_ended<'a>(&self, results: impl AsRef<[(&'a Player, Results)]>);
 }
 
 /// Pairings manager
@@ -86,7 +86,12 @@ where
 
     /// Update internal state with round results
     #[inline]
-    pub fn round_ended(&self, results: impl AsRef<[(Player, Results)]>) {
+    pub fn round_ended<'a>(&self, results: impl AsRef<[(&'a Player, Results)]>) {
+        assert!(
+            results.as_ref().len() == self.players.len(),
+            "results length mismatch"
+        );
+
         self.algorithm.round_ended(results)
     }
 }

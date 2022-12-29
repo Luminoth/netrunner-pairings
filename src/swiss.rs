@@ -43,11 +43,19 @@ impl PairingAlgorithm for SwissPairingAlgorithm {
         Self { players }
     }
 
-    fn next_pairings(&self, _pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
-        vec![]
+    fn next_pairings(&self, previous_pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
+        let pairings = vec![];
+
+        if previous_pairings.is_empty() {
+            // TODO: shuffle the players and pull random pairings
+        }
+
+        pairings
     }
 
-    fn round_ended(&self, _results: impl AsRef<[(Player, Results)]>) {}
+    fn round_ended<'a>(&self, _results: impl AsRef<[(&'a Player, Results)]>) {
+        // TODO: ensure the results make sense (each player has 2 games and the pairing results make sense)
+    }
 }
 
 pub type SwissPairing = PairingsManager<SwissPairingAlgorithm>;
@@ -57,8 +65,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple() {
-        let players = vec![Player::new("test")];
-        let _pairings = SwissPairing::new(players);
+    fn two_players() {
+        let players = vec![Player::new("test a"), Player::new("test b")];
+        let pairings = SwissPairing::new(players.clone());
+
+        let first_round = pairings.next_pairings();
+        assert_eq!(first_round.len(), 1);
+        assert!(
+            first_round[0].get_player_a().get_name() == players[0].get_name()
+                || first_round[0].get_player_b().unwrap().get_name() == players[0].get_name()
+        );
+
+        pairings.round_ended(vec![
+            // game 1
+            (&players[0], Results::Win),
+            (&players[1], Results::Loss),
+            // game 2
+            (&players[0], Results::Draw),
+            (&players[1], Results::Draw),
+        ]);
     }
 }
