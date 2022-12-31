@@ -2,19 +2,19 @@
 //!
 //! https://stimhack.com/single-sided-swiss-how-it-works-by-ysengrin/
 
-use std::collections::HashSet;
-
-use crate::{Pairing, PairingAlgorithm, PairingsManager, Player, PlayerHandle, Results};
+use crate::{Pairing, PairingAlgorithm, PairingsManager, Player, Result, Round};
 
 #[derive(Debug)]
 struct SingleSwissPlayer {
-    player: PlayerHandle,
+    player_id: String,
 }
 
-impl From<PlayerHandle> for SingleSwissPlayer {
+impl From<&Player> for SingleSwissPlayer {
     #[inline]
-    fn from(player: PlayerHandle) -> Self {
-        Self { player }
+    fn from(player: &Player) -> Self {
+        Self {
+            player_id: player.get_id().clone(),
+        }
     }
 }
 
@@ -25,38 +25,29 @@ pub struct SingleSwissPairingAlgorithm {
 }
 
 impl PairingAlgorithm for SingleSwissPairingAlgorithm {
-    fn new(players: impl AsRef<[PlayerHandle]>) -> Self {
-        let players = players
-            .as_ref()
-            .iter()
-            .map(|player| player.clone().into())
-            .collect::<Vec<_>>();
-        Self { players }
+    #[inline]
+    fn get_total_rounds(&self, _player_count: usize) -> usize {
+        todo!()
     }
 
-    fn next_pairings(&self, previous_pairings: &HashSet<Pairing>, _round: usize) -> Vec<Pairing> {
-        let pairings = vec![];
-
-        if previous_pairings.is_empty() {
-            // TODO: shuffle the players and pull random pairings
-        }
-
-        pairings
+    fn get_top_cut(&self, _player_count: usize) -> Option<usize> {
+        todo!()
     }
 
-    fn round_ended<'a>(&self, _results: impl AsRef<[(&'a Player, Results)]>) {
-        // TODO: ensure the results make sense (each player has 1 game and the pairing results make sense)
+    fn next_pairings(
+        &self,
+        _players: impl AsRef<[Player]>,
+        _rounds: impl AsRef<[Round]>,
+    ) -> Vec<Pairing> {
+        todo!()
+    }
+
+    fn round_ended<'a>(&self, _results: impl AsRef<[(&'a Pairing, Result)]>) {
+        todo!()
     }
 }
 
 pub type SingleSwissPairing = PairingsManager<SingleSwissPairingAlgorithm>;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simple() {
-        let _pairings = SingleSwissPairing::new(vec![]);
-    }
-}
+mod tests {}

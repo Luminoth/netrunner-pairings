@@ -4,93 +4,90 @@
 
 mod pairing;
 mod player;
+mod round;
 mod single_swiss;
 mod swiss;
 
-use std::cell::RefCell;
-use std::collections::HashSet;
-
 pub use pairing::*;
 pub use player::*;
+pub use round::*;
 pub use single_swiss::*;
 pub use swiss::*;
 
-/// Round results
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Results {
-    Win,
-    Draw,
-    Loss,
-    Bye,
-}
-
 /// Pairing algorithm interface
-pub trait PairingAlgorithm {
-    /// Creates a new pairing algorithm
-    fn new(players: impl AsRef<[PlayerHandle]>) -> Self;
+pub trait PairingAlgorithm: Default {
+    /// Gets the number of rounds needed for the given player count
+    ///
+    /// # Panics
+    ///
+    /// Panics if player_count is less than 2
+    fn get_total_rounds(&self, player_count: usize) -> usize;
+
+    /// Gets the top cut number of players given the player count
+    fn get_top_cut(&self, player_count: usize) -> Option<usize>;
 
     /// Determine the next pairing of the given players
-    fn next_pairings(&self, previous_pairings: &HashSet<Pairing>, round: usize) -> Vec<Pairing>;
+    fn next_pairings(
+        &self,
+        players: impl AsRef<[Player]>,
+        rounds: impl AsRef<[Round]>,
+    ) -> Vec<Pairing>;
 
     /// Update internal state with round results
-    fn round_ended<'a>(&self, results: impl AsRef<[(&'a Player, Results)]>);
+    fn round_ended<'a>(&self, results: impl AsRef<[(&'a Pairing, Result)]>);
 }
 
 /// Pairings manager
+#[derive(Debug, Default)]
 pub struct PairingsManager<T>
 where
     T: PairingAlgorithm,
 {
     algorithm: T,
 
-    players: Vec<PlayerHandle>,
-    pairings: HashSet<Pairing>,
-    current_round: RefCell<usize>,
+    rounds: Vec<Round>,
 }
 
 impl<T> PairingsManager<T>
 where
     T: PairingAlgorithm,
 {
-    /// Creates a new pairings manager
-    pub fn new(players: impl Into<Vec<Player>>) -> Self {
-        let players = players
-            .into()
-            .drain(..)
-            .map(PlayerHandle::new)
-            .collect::<Vec<_>>();
-        let algorithm = T::new(&players);
+    /// Gets the number of rounds needed for the given player count
+    ///
+    /// # Panics
+    ///
+    /// Panics if player_count is less than 2
+    #[inline]
+    pub fn get_total_rounds(&self, player_count: usize) -> usize {
+        self.algorithm.get_total_rounds(player_count)
+    }
 
-        Self {
-            algorithm,
-            players,
-            pairings: HashSet::new(),
-            current_round: RefCell::new(0),
-        }
+    /// Gets the top cut number of players given the player count
+    #[inline]
+    pub fn get_top_cut(&self, player_count: usize) -> Option<usize> {
+        self.algorithm.get_top_cut(player_count)
     }
 
     /// Gets the current round number
     #[inline]
     pub fn get_current_round(&self) -> usize {
-        *self.current_round.borrow()
+        self.rounds.len() + 1
     }
 
     /// Determine the next pairing of the given players
     #[inline]
-    pub fn next_pairings(&self) -> Vec<Pairing> {
-        *self.current_round.borrow_mut() += 1;
+    pub fn next_round(&mut self, players: impl AsRef<[Player]>) -> Vec<Pairing> {
+        let pairings = self.algorithm.next_pairings(players, &self.rounds);
 
-        self.algorithm
-            .next_pairings(&self.pairings, self.get_current_round())
+        self.rounds.push(Round::new(pairings.clone()));
+
+        pairings
     }
 
     /// Update internal state with round results
     #[inline]
-    pub fn round_ended<'a>(&self, results: impl AsRef<[(&'a Player, Results)]>) {
-        assert!(
-            results.as_ref().len() == self.players.len(),
-            "results length mismatch"
-        );
+    pub fn round_ended<'a>(&mut self, results: impl AsRef<[(&'a Pairing, Result)]>) {
+        self.rounds.last_mut().unwrap().round_ended(&results);
 
         self.algorithm.round_ended(results)
     }
