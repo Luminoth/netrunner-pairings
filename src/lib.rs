@@ -6,6 +6,9 @@ mod pairing;
 mod player;
 mod round;
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use rand::{seq::SliceRandom, thread_rng};
 
 pub use pairing::*;
@@ -14,79 +17,101 @@ pub use round::*;
 
 /// Swiss style player stats
 #[derive(Debug)]
-pub struct SwissPlayer {
-    player_id: String,
-
-    strength_of_schedule: f32,
-    extended_strength_of_schedule: f32,
+struct SwissStats {
+    score: u64,
+    rounds: u64,
 }
 
-impl From<&Player> for SwissPlayer {
-    #[inline]
-    fn from(player: &Player) -> Self {
-        Self {
-            player_id: player.get_id().clone(),
-            strength_of_schedule: 0.0,
-            extended_strength_of_schedule: 0.0,
+impl SwissStats {
+    fn average_points_per_rounds(&self) -> f32 {
+        if self.rounds == 0 {
+            return 0.0;
         }
+        self.score as f32 / self.rounds as f32
+    }
+
+    fn strength_of_schedule(&self, player: &Player, rounds: impl AsRef<[Round]>) -> f32 {
+        let rounds = rounds.as_ref();
+        if rounds.is_empty() {
+            return 0.0;
+        }
+
+        let mut total = 0.0;
+        for round in rounds {
+            for pairing in round.get_pairings() {
+                if let Some(_opponent) = pairing.get_player_opponent(player) {
+                    // TODO: add the opponents average_points_per_rounds to the total
+                    total += 0.0;
+                }
+            }
+        }
+
+        total / rounds.len() as f32
+    }
+
+    fn extended_strength_of_schedule(&self, player: &Player, rounds: impl AsRef<[Round]>) -> f32 {
+        let rounds = rounds.as_ref();
+
+        let mut opponent_count = 0;
+        let mut total = 0.0;
+        for round in rounds {
+            for pairing in round.get_pairings() {
+                if let Some(_opponent) = pairing.get_player_opponent(player) {
+                    // TODO: add the opponents strength_of_schedule to the total
+                    total += 0.0;
+
+                    opponent_count += 1;
+                }
+            }
+        }
+
+        if opponent_count == 0 {
+            return 0.0;
+        }
+        total / opponent_count as f32
     }
 }
 
 /// Single-sided swiss player stats
 #[derive(Debug)]
-pub struct SingleSwissPlayer {
-    player_id: String,
+struct SingleSwissStats {
+    score: u64,
 }
 
-impl From<&Player> for SingleSwissPlayer {
-    #[inline]
-    fn from(player: &Player) -> Self {
-        Self {
-            player_id: player.get_id().clone(),
-        }
-    }
-}
-
-/// Pairings
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Pairings {
+enum PairingsAlgorithm {
     /// Swiss style pairings
     ///
     /// https://en.wikipedia.org/wiki/Swiss-system_tournament
     /// https://images-cdn.fantasyflightgames.com/ffg_content/organized-play/support/op-flyer-booklet.pdf
     /// https://images-cdn.fantasyflightgames.com/ffg_content/android-netrunner/support/FAQ/Android-Netrunner%20Tournament%20Rules.pdf
     /// https://nullsignal.games/wp-content/uploads/2022/11/Null_Signal_Organized_Play_Policies_v1.5.pdf
-    Swiss(Vec<SwissPlayer>, Vec<Round>),
+    Swiss(HashMap<String, SwissStats>),
 
     /// Single-sided Swiss pairings
     ///
     /// https://stimhack.com/single-sided-swiss-how-it-works-by-ysengrin/
-    SingleSwiss(Vec<SingleSwissPlayer>, Vec<Round>),
+    SingleSwiss(HashMap<String, SingleSwissStats>),
 }
 
-impl Pairings {
+impl PairingsAlgorithm {
     /// Creates a new Swiss style pairings
     #[inline]
-    pub fn new_swiss() -> Self {
-        Self::Swiss(vec![], vec![])
+    fn new_swiss() -> Self {
+        Self::Swiss(HashMap::new())
     }
 
     /// Creates a new Single-sided Swiss pairings
     #[inline]
-    pub fn new_single_swiss() -> Self {
-        Self::SingleSwiss(vec![], vec![])
+    fn new_single_swiss() -> Self {
+        Self::SingleSwiss(HashMap::new())
     }
 
-    /// Gets the number of rounds needed for the given player count
-    ///
-    /// # Panics
-    ///
-    /// Panics if player_count is less than 2
     #[inline]
-    pub fn get_total_rounds(&self, player_count: usize) -> usize {
+    fn get_total_rounds(&self, player_count: usize) -> usize {
         match self {
-            Self::Swiss(_, _) => match player_count {
+            Self::Swiss(_) => match player_count {
                 0..=1 => panic!("not enough players"),
                 2..=9 => 3,
                 10..=32 => 4,
@@ -97,78 +122,172 @@ impl Pairings {
                 193..=256 => 8,
                 _ => 9,
             },
-            Self::SingleSwiss(_, _) => match player_count {
+            Self::SingleSwiss(_) => match player_count {
                 0..=1 => panic!("not enough players"),
                 _ => todo!(),
             },
         }
     }
 
-    /// Gets the top cut number of players given the player count
     #[inline]
-    pub fn get_top_cut(&self, player_count: usize) -> Option<usize> {
+    fn get_top_cut(&self, player_count: usize) -> Option<usize> {
         match self {
-            Self::Swiss(_, _) => match player_count {
+            Self::Swiss(_) => match player_count {
                 0..=1 => panic!("not enough players"),
                 2..=15 => None,
                 16..=24 => Some(4),
                 25..=128 => Some(8),
                 _ => Some(16),
             },
-            Self::SingleSwiss(_, _) => match player_count {
+            Self::SingleSwiss(_) => match player_count {
                 0..=1 => panic!("not enough players"),
                 _ => todo!(),
             },
         }
     }
 
+    fn sort_players(&self, players: &mut Vec<Player>, rounds: impl AsRef<[Round]>) {
+        let rounds = rounds.as_ref();
+
+        // first round is always random pairing
+        if rounds.is_empty() {
+            players.shuffle(&mut thread_rng());
+            return;
+        }
+
+        match self {
+            Self::Swiss(stats) => players.sort_by(|x, y| {
+                let xs = stats.get(x.get_id()).unwrap();
+                let ys = stats.get(y.get_id()).unwrap();
+
+                // order by score first
+                let score = xs.score.cmp(&ys.score);
+                if score != Ordering::Equal {
+                    return score;
+                }
+
+                // break ties by sos
+                let xsos = xs.strength_of_schedule(x, rounds);
+                let ysos = ys.strength_of_schedule(y, rounds);
+
+                let sos = xsos.partial_cmp(&ysos).unwrap();
+                if sos != Ordering::Equal {
+                    return sos;
+                }
+
+                // break further ties by extended sos
+                let xesos = xs.extended_strength_of_schedule(x, rounds);
+                let yesos = ys.extended_strength_of_schedule(y, rounds);
+
+                let esos = xesos.partial_cmp(&yesos).unwrap();
+                if esos != Ordering::Equal {
+                    return esos;
+                }
+
+                // finally, randomize
+                // TODO:
+                Ordering::Equal
+            }),
+            Self::SingleSwiss(_) => todo!(),
+        }
+    }
+
+    fn next_pairings(&self, mut players: Vec<Player>, rounds: impl AsRef<[Round]>) -> Vec<Pairing> {
+        self.sort_players(&mut players, &rounds);
+
+        let mut pairings = vec![];
+        match self {
+            Self::Swiss(_) => {
+                // TODO: if we have odd players, pop off the lowest player as the bye
+
+                // TODO: this isn't right? we need to rank and group players first?
+                for pairing in players.chunks(2) {
+                    pairings.push(Pairing::from_slice(pairing));
+                }
+            }
+            Self::SingleSwiss(_) => todo!(),
+        }
+
+        pairings
+    }
+
+    fn round_ended<'a>(&mut self, _results: impl AsRef<[(&'a Pairing, Result)]>) {
+        match self {
+            Self::Swiss(_) => {
+                // TODO: ensure the results make sense (each player has 2 games and the pairing results make sense)
+
+                // TODO: update each player's stats
+
+                todo!()
+            }
+            Self::SingleSwiss(_) => todo!(),
+        }
+    }
+}
+
+/// Pairings
+#[derive(Debug)]
+pub struct Pairings {
+    algorithm: PairingsAlgorithm,
+    rounds: Vec<Round>,
+}
+
+impl Pairings {
+    /// Creates a new Swiss style pairings
+    #[inline]
+    pub fn new_swiss() -> Self {
+        Self {
+            algorithm: PairingsAlgorithm::new_swiss(),
+            rounds: vec![],
+        }
+    }
+
+    /// Creates a new Single-sided Swiss pairings
+    #[inline]
+    pub fn new_single_swiss() -> Self {
+        Self {
+            algorithm: PairingsAlgorithm::new_single_swiss(),
+            rounds: vec![],
+        }
+    }
+
+    /// Gets the number of rounds needed for the given player count
+    ///
+    /// # Panics
+    ///
+    /// Panics if player_count is less than 2
+    #[inline]
+    pub fn get_total_rounds(&self, player_count: usize) -> usize {
+        self.algorithm.get_total_rounds(player_count)
+    }
+
+    /// Gets the top cut number of players given the player count
+    #[inline]
+    pub fn get_top_cut(&self, player_count: usize) -> Option<usize> {
+        self.algorithm.get_top_cut(player_count)
+    }
+
     /// Gets the current round number
     #[inline]
     pub fn get_current_round(&self) -> usize {
-        match self {
-            Self::Swiss(_, rounds) => rounds.len() + 1,
-            Self::SingleSwiss(_, rounds) => rounds.len() + 1,
-        }
+        self.rounds.len() + 1
     }
 
     /// Determine the next pairing of the given players
     pub fn next_round(&mut self, players: impl AsRef<[Player]>) -> Vec<Pairing> {
-        let mut players = players.as_ref().to_owned();
-        let mut pairings = vec![];
+        let players = players.as_ref().to_owned();
+        let pairings = self.algorithm.next_pairings(players, &self.rounds);
 
-        match self {
-            Self::Swiss(_, rounds) => {
-                // first round is always random pairing
-                if rounds.is_empty() {
-                    players.shuffle(&mut thread_rng());
-
-                    for pairing in players.chunks(2) {
-                        pairings.push(Pairing::from_slice(pairing));
-                    }
-                } else {
-                    // TODO: do the algorithm
-                }
-
-                rounds.push(Round::new(pairings.clone()));
-            }
-            Self::SingleSwiss(_, _) => todo!(),
-        }
+        self.rounds.push(Round::new(pairings.clone()));
 
         pairings
     }
 
     /// Update internal state with round results
     pub fn round_ended<'a>(&mut self, results: impl AsRef<[(&'a Pairing, Result)]>) {
-        match self {
-            Self::Swiss(_, rounds) => {
-                rounds.last_mut().unwrap().round_ended(&results);
+        self.rounds.last_mut().unwrap().round_ended(&results);
 
-                // TODO: ensure the results make sense (each player has 2 games and the pairing results make sense)
-
-                todo!()
-            }
-            Self::SingleSwiss(_, _) => todo!(),
-        }
+        self.algorithm.round_ended(results)
     }
 }
 

@@ -54,6 +54,20 @@ impl Pairing {
         )
     }
 
+    /// Checks if the given player is in this pairing
+    #[inline]
+    pub fn has_player(&self, player: &Player) -> bool {
+        if self.player == *player {
+            return true;
+        }
+
+        if let Some(opponent) = &self.opponent {
+            return *opponent == *player;
+        }
+
+        false
+    }
+
     /// Gets the first player in the pairing
     #[inline]
     pub fn get_player(&self) -> &Player {
@@ -66,6 +80,22 @@ impl Pairing {
     #[inline]
     pub fn get_opponent(&self) -> &Option<Player> {
         &self.opponent
+    }
+
+    /// Returns the given player's opponent if they were in this pairing and had an opponent
+    #[inline]
+    pub fn get_player_opponent(&self, player: &Player) -> Option<&Player> {
+        if self.player == *player {
+            return self.opponent.as_ref();
+        }
+
+        if let Some(opponent) = &self.opponent {
+            if *opponent == *player {
+                return Some(&self.player);
+            }
+        }
+
+        None
     }
 
     /// Gets the pairing result

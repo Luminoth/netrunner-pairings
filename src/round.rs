@@ -19,6 +19,12 @@ impl Round {
         }
     }
 
+    /// Get the round's pairings
+    #[inline]
+    pub(crate) fn get_pairings(&self) -> &Vec<Pairing> {
+        &self.pairings
+    }
+
     /// Update internal state with round results
     pub(crate) fn round_ended<'a>(&mut self, results: impl AsRef<[(&'a Pairing, Result)]>) {
         // TODO: this sucks, the round should store the pairings
