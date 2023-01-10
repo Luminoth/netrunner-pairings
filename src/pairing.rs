@@ -30,10 +30,20 @@ impl PartialEq for Pairing {
 impl Pairing {
     /// Creates a new pairing
     #[inline]
-    pub(crate) fn new(player: Player, opponent: Option<Player>) -> Self {
+    pub(crate) fn new(player: Player, opponent: Player) -> Self {
         Self {
             player,
-            opponent,
+            opponent: Some(opponent),
+            result: None,
+        }
+    }
+
+    /// Creates a new Bye pairing
+    #[inline]
+    pub(crate) fn new_bye(player: Player) -> Self {
+        Self {
+            player,
+            opponent: None,
             result: None,
         }
     }
@@ -44,14 +54,15 @@ impl Pairing {
         let players = players.as_ref();
         assert!(players.len() == 1 || players.len() == 2);
 
-        Self::new(
-            players[0].clone(),
-            if players.len() > 1 {
+        Self {
+            player: players[0].clone(),
+            opponent: if players.len() > 1 {
                 Some(players[1].clone())
             } else {
                 None
             },
-        )
+            result: None,
+        }
     }
 
     /// Checks if the given player is in this pairing

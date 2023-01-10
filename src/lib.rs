@@ -9,6 +9,7 @@ mod round;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use rand::{seq::SliceRandom, thread_rng};
 
 pub use pairing::*;
@@ -19,15 +20,18 @@ pub use round::*;
 #[derive(Debug)]
 struct SwissStats {
     score: u64,
-    rounds: u64,
+
+    // TODO: should this just track the round opponents?
+    // that might make score calculation easier
+    rounds_played: u64,
 }
 
 impl SwissStats {
     fn average_points_per_rounds(&self) -> f32 {
-        if self.rounds == 0 {
+        if self.rounds_played == 0 {
             return 0.0;
         }
-        self.score as f32 / self.rounds as f32
+        self.score as f32 / self.rounds_played as f32
     }
 
     fn strength_of_schedule(&self, player: &Player, rounds: impl AsRef<[Round]>) -> f32 {
@@ -146,14 +150,8 @@ impl PairingsAlgorithm {
         }
     }
 
-    fn sort_players(&self, players: &mut Vec<Player>, rounds: impl AsRef<[Round]>) {
+    fn rank_players(&self, players: &mut [Player], rounds: impl AsRef<[Round]>) {
         let rounds = rounds.as_ref();
-
-        // first round is always random pairing
-        if rounds.is_empty() {
-            players.shuffle(&mut thread_rng());
-            return;
-        }
 
         match self {
             Self::Swiss(stats) => players.sort_by(|x, y| {
@@ -193,16 +191,46 @@ impl PairingsAlgorithm {
     }
 
     fn next_pairings(&self, mut players: Vec<Player>, rounds: impl AsRef<[Round]>) -> Vec<Pairing> {
-        self.sort_players(&mut players, &rounds);
+        let mut rng = thread_rng();
 
         let mut pairings = vec![];
         match self {
-            Self::Swiss(_) => {
-                // TODO: if we have odd players, pop off the lowest player as the bye
+            Self::Swiss(stats) => {
+                if rounds.as_ref().is_empty() {
+                    // first round is always random pairing
+                    players.shuffle(&mut rng);
 
-                // TODO: this isn't right? we need to rank and group players first?
-                for pairing in players.chunks(2) {
-                    pairings.push(Pairing::from_slice(pairing));
+                    // handle bye (odd number of players)
+                    if players.len() % 2 != 0 {
+                        let player = players.pop().unwrap();
+                        pairings.push(Pairing::new_bye(player));
+                    }
+
+                    for pairing in players.chunks(2) {
+                        pairings.push(Pairing::from_slice(pairing));
+                    }
+                } else {
+                    self.rank_players(&mut players, &rounds);
+
+                    // group players by score
+                    let mut groupings = vec![];
+                    for (_, group) in &players
+                        .iter()
+                        .group_by(|player| stats.get(player.get_id()).unwrap().score)
+                    {
+                        groupings.push(group.collect::<Vec<_>>());
+                    }
+
+                    // pair players within their groups
+                    for mut group in groupings {
+                        group.shuffle(&mut rng);
+
+                        // TODO: these pairings should be random
+                        // and then corrected so that no player plays the same player twice
+                        // dipping down into the next grouping where needed
+                        // also, if an odd number of players haven't had a bye
+                        // then the lowest ranked player who hasn't had a bye gets it
+                    }
                 }
             }
             Self::SingleSwiss(_) => todo!(),
@@ -431,7 +459,7 @@ mod tests {
 
         let first_round = pairings.next_round(&players);
         assert_eq!(first_round.len(), 2);
-        assert!(first_round[1].get_opponent().is_none());
+        assert!(first_round[0].get_opponent().is_none());
 
         pairings.round_ended(vec![
             // game 1
