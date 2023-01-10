@@ -5,53 +5,79 @@
 mod pairing;
 mod player;
 mod round;
-mod single_swiss;
-mod swiss;
+
+use rand::{seq::SliceRandom, thread_rng};
 
 pub use pairing::*;
 pub use player::*;
 pub use round::*;
-pub use single_swiss::*;
-pub use swiss::*;
 
-/// Pairing algorithm interface
-pub trait PairingAlgorithm: Default {
-    /// Gets the number of rounds needed for the given player count
-    ///
-    /// # Panics
-    ///
-    /// Panics if player_count is less than 2
-    fn get_total_rounds(&self, player_count: usize) -> usize;
+/// Swiss style player stats
+#[derive(Debug)]
+pub struct SwissPlayer {
+    player_id: String,
 
-    /// Gets the top cut number of players given the player count
-    fn get_top_cut(&self, player_count: usize) -> Option<usize>;
-
-    /// Determine the next pairing of the given players
-    fn next_pairings(
-        &self,
-        players: impl AsRef<[Player]>,
-        rounds: impl AsRef<[Round]>,
-    ) -> Vec<Pairing>;
-
-    /// Update internal state with round results
-    fn round_ended<'a>(&self, results: impl AsRef<[(&'a Pairing, Result)]>);
+    strength_of_schedule: f32,
+    extended_strength_of_schedule: f32,
 }
 
-/// Pairings manager
-#[derive(Debug, Default)]
-pub struct PairingsManager<T>
-where
-    T: PairingAlgorithm,
-{
-    algorithm: T,
-
-    rounds: Vec<Round>,
+impl From<&Player> for SwissPlayer {
+    #[inline]
+    fn from(player: &Player) -> Self {
+        Self {
+            player_id: player.get_id().clone(),
+            strength_of_schedule: 0.0,
+            extended_strength_of_schedule: 0.0,
+        }
+    }
 }
 
-impl<T> PairingsManager<T>
-where
-    T: PairingAlgorithm,
-{
+/// Single-sided swiss player stats
+#[derive(Debug)]
+pub struct SingleSwissPlayer {
+    player_id: String,
+}
+
+impl From<&Player> for SingleSwissPlayer {
+    #[inline]
+    fn from(player: &Player) -> Self {
+        Self {
+            player_id: player.get_id().clone(),
+        }
+    }
+}
+
+/// Pairings
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Pairings {
+    /// Swiss style pairings
+    ///
+    /// https://en.wikipedia.org/wiki/Swiss-system_tournament
+    /// https://images-cdn.fantasyflightgames.com/ffg_content/organized-play/support/op-flyer-booklet.pdf
+    /// https://images-cdn.fantasyflightgames.com/ffg_content/android-netrunner/support/FAQ/Android-Netrunner%20Tournament%20Rules.pdf
+    /// https://nullsignal.games/wp-content/uploads/2022/11/Null_Signal_Organized_Play_Policies_v1.5.pdf
+    Swiss(Vec<SwissPlayer>, Vec<Round>),
+
+    /// Single-sided Swiss pairings
+    ///
+    /// https://stimhack.com/single-sided-swiss-how-it-works-by-ysengrin/
+    SingleSwiss(Vec<SingleSwissPlayer>, Vec<Round>),
+}
+
+impl Pairings {
+    /// Creates a new Swiss style pairings
+    #[inline]
+    pub fn new_swiss() -> Self {
+        Self::Swiss(vec![], vec![])
+    }
+
+    /// Creates a new Single-sided Swiss pairings
+    #[inline]
+    pub fn new_single_swiss() -> Self {
+        Self::SingleSwiss(vec![], vec![])
+    }
+
     /// Gets the number of rounds needed for the given player count
     ///
     /// # Panics
@@ -59,36 +85,244 @@ where
     /// Panics if player_count is less than 2
     #[inline]
     pub fn get_total_rounds(&self, player_count: usize) -> usize {
-        self.algorithm.get_total_rounds(player_count)
+        match self {
+            Self::Swiss(_, _) => match player_count {
+                0..=1 => panic!("not enough players"),
+                2..=9 => 3,
+                10..=32 => 4,
+                33..=56 => 5,
+                57..=80 => 6,
+                81..=128 => 7,
+                129..=192 => 7,
+                193..=256 => 8,
+                _ => 9,
+            },
+            Self::SingleSwiss(_, _) => match player_count {
+                0..=1 => panic!("not enough players"),
+                _ => todo!(),
+            },
+        }
     }
 
     /// Gets the top cut number of players given the player count
     #[inline]
     pub fn get_top_cut(&self, player_count: usize) -> Option<usize> {
-        self.algorithm.get_top_cut(player_count)
+        match self {
+            Self::Swiss(_, _) => match player_count {
+                0..=1 => panic!("not enough players"),
+                2..=15 => None,
+                16..=24 => Some(4),
+                25..=128 => Some(8),
+                _ => Some(16),
+            },
+            Self::SingleSwiss(_, _) => match player_count {
+                0..=1 => panic!("not enough players"),
+                _ => todo!(),
+            },
+        }
     }
 
     /// Gets the current round number
     #[inline]
     pub fn get_current_round(&self) -> usize {
-        self.rounds.len() + 1
+        match self {
+            Self::Swiss(_, rounds) => rounds.len() + 1,
+            Self::SingleSwiss(_, rounds) => rounds.len() + 1,
+        }
     }
 
     /// Determine the next pairing of the given players
-    #[inline]
     pub fn next_round(&mut self, players: impl AsRef<[Player]>) -> Vec<Pairing> {
-        let pairings = self.algorithm.next_pairings(players, &self.rounds);
+        let mut players = players.as_ref().to_owned();
+        let mut pairings = vec![];
 
-        self.rounds.push(Round::new(pairings.clone()));
+        match self {
+            Self::Swiss(_, rounds) => {
+                // first round is always random pairing
+                if rounds.is_empty() {
+                    players.shuffle(&mut thread_rng());
+
+                    for pairing in players.chunks(2) {
+                        pairings.push(Pairing::from_slice(pairing));
+                    }
+                } else {
+                    // TODO: do the algorithm
+                }
+
+                rounds.push(Round::new(pairings.clone()));
+            }
+            Self::SingleSwiss(_, _) => todo!(),
+        }
 
         pairings
     }
 
     /// Update internal state with round results
-    #[inline]
     pub fn round_ended<'a>(&mut self, results: impl AsRef<[(&'a Pairing, Result)]>) {
-        self.rounds.last_mut().unwrap().round_ended(&results);
+        match self {
+            Self::Swiss(_, rounds) => {
+                rounds.last_mut().unwrap().round_ended(&results);
 
-        self.algorithm.round_ended(results)
+                // TODO: ensure the results make sense (each player has 2 games and the pairing results make sense)
+
+                todo!()
+            }
+            Self::SingleSwiss(_, _) => todo!(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn invalid_round_count_0_players() {
+        let pairings = Pairings::new_swiss();
+
+        pairings.get_total_rounds(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_round_count_1_player() {
+        let pairings = Pairings::new_swiss();
+
+        pairings.get_total_rounds(1);
+    }
+
+    #[test]
+    fn round_counts() {
+        let pairings = Pairings::new_swiss();
+
+        assert_eq!(pairings.get_total_rounds(2), 3);
+        assert_eq!(pairings.get_total_rounds(9), 3);
+
+        assert_eq!(pairings.get_total_rounds(10), 4);
+        assert_eq!(pairings.get_total_rounds(15), 4);
+        assert_eq!(pairings.get_total_rounds(16), 4);
+        assert_eq!(pairings.get_total_rounds(24), 4);
+        assert_eq!(pairings.get_total_rounds(25), 4);
+        assert_eq!(pairings.get_total_rounds(32), 4);
+
+        assert_eq!(pairings.get_total_rounds(33), 5);
+        assert_eq!(pairings.get_total_rounds(56), 5);
+
+        assert_eq!(pairings.get_total_rounds(57), 6);
+        assert_eq!(pairings.get_total_rounds(80), 6);
+
+        assert_eq!(pairings.get_total_rounds(81), 7);
+        assert_eq!(pairings.get_total_rounds(128), 7);
+        assert_eq!(pairings.get_total_rounds(129), 7);
+        assert_eq!(pairings.get_total_rounds(192), 7);
+
+        assert_eq!(pairings.get_total_rounds(193), 8);
+        assert_eq!(pairings.get_total_rounds(256), 8);
+
+        assert_eq!(pairings.get_total_rounds(257), 9);
+        assert_eq!(pairings.get_total_rounds(usize::MAX), 9);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_top_cut_0_players() {
+        let pairings = Pairings::new_swiss();
+
+        pairings.get_top_cut(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_top_cut_1_player() {
+        let pairings = Pairings::new_swiss();
+
+        pairings.get_top_cut(1);
+    }
+
+    #[test]
+    fn top_cut() {
+        let pairings = Pairings::new_swiss();
+
+        assert_eq!(pairings.get_top_cut(2), None);
+        assert_eq!(pairings.get_top_cut(9), None);
+        assert_eq!(pairings.get_top_cut(10), None);
+        assert_eq!(pairings.get_top_cut(15), None);
+
+        assert_eq!(pairings.get_top_cut(16), Some(4));
+        assert_eq!(pairings.get_top_cut(24), Some(4));
+
+        assert_eq!(pairings.get_top_cut(25), Some(8));
+        assert_eq!(pairings.get_top_cut(32), Some(8));
+        assert_eq!(pairings.get_top_cut(33), Some(8));
+        assert_eq!(pairings.get_top_cut(56), Some(8));
+        assert_eq!(pairings.get_top_cut(57), Some(8));
+        assert_eq!(pairings.get_top_cut(80), Some(8));
+        assert_eq!(pairings.get_top_cut(81), Some(8));
+        assert_eq!(pairings.get_top_cut(128), Some(8));
+
+        assert_eq!(pairings.get_top_cut(129), Some(16));
+        assert_eq!(pairings.get_top_cut(192), Some(16));
+        assert_eq!(pairings.get_top_cut(193), Some(16));
+        assert_eq!(pairings.get_top_cut(256), Some(16));
+        assert_eq!(pairings.get_top_cut(257), Some(16));
+        assert_eq!(pairings.get_top_cut(usize::MAX), Some(16));
+    }
+
+    #[test]
+    fn two_players_first_round() {
+        let players = vec![
+            Player::new("afirst", "alast", None),
+            Player::new("bfirst", "blast", None),
+        ];
+
+        let mut pairings = Pairings::new_swiss();
+
+        let first_round = pairings.next_round(&players);
+        assert_eq!(first_round.len(), 1);
+        assert!(
+            first_round[0].get_player().get_full_name() == players[0].get_full_name()
+                || first_round[0]
+                    .get_opponent()
+                    .as_ref()
+                    .unwrap()
+                    .get_full_name()
+                    == players[0].get_full_name()
+        );
+
+        pairings.round_ended(vec![
+            // game 1
+            (&first_round[0], Result::Win),
+            // game 2
+            (&first_round[0], Result::Draw),
+        ]);
+
+        // TODO: validate the updated results
+    }
+
+    #[test]
+    fn three_players_first_round() {
+        let players = vec![
+            Player::new("afirst", "alast", None),
+            Player::new("bfirst", "blast", None),
+            Player::new("cfirst", "clast", None),
+        ];
+
+        let mut pairings = Pairings::new_swiss();
+
+        let first_round = pairings.next_round(&players);
+        assert_eq!(first_round.len(), 2);
+        assert!(first_round[1].get_opponent().is_none());
+
+        pairings.round_ended(vec![
+            // game 1
+            (&first_round[0], Result::Win),
+            (&first_round[0], Result::Bye),
+            // game 2
+            (&first_round[0], Result::Draw),
+            (&first_round[0], Result::Bye),
+        ]);
+
+        // TODO: validate the updated results
     }
 }
